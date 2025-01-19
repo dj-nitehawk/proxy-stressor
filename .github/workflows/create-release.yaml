@@ -37,6 +37,7 @@ jobs:
           else
             dotnet publish ./ProxyStressor.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -o ./bin/${{ matrix.rid }}
           fi
+          rm -rf ./bin/${{ matrix.rid }}/*.dbg
           cd ./bin/${{ matrix.rid }}
           zip -r -9 ../${{ matrix.rid }}.zip ./*
 
