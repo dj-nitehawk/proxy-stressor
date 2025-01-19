@@ -39,18 +39,15 @@ if (string.IsNullOrWhiteSpace(websiteUrl))
     return;
 }
 
-var proxy = new WebProxy(proxyAddress)
+var handler = new SocketsHttpHandler
 {
-    Credentials = new NetworkCredential(proxyUsername, proxyPassword)
-};
-
-var handler = new HttpClientHandler
-{
-    Proxy = proxy,
-    UseProxy = true
+    Proxy = new WebProxy(proxyAddress, true, null, new NetworkCredential(proxyUsername, proxyPassword)),
+    UseProxy = true,
+    ConnectTimeout = TimeSpan.FromSeconds(5)
 };
 
 using var httpClient = new HttpClient(handler);
+httpClient.Timeout = TimeSpan.FromSeconds(10);
 var cts = new CancellationTokenSource(TimeSpan.FromSeconds(testDuration));
 var token = cts.Token;
 
@@ -61,66 +58,64 @@ var totalDurations = new ConcurrentBag<long>();
 
 Console.WriteLine("Starting stress test...");
 var stopwatch = Stopwatch.StartNew();
-var tasks = new Task[concurrentRequests];
 
-for (var i = 0; i < concurrentRequests; i++)
+async ValueTask MakeRequests(int _, CancellationToken __)
 {
-    tasks[i] = Task.Run(
-        async () =>
+    while (!token.IsCancellationRequested)
+    {
+        var requestStopwatch = Stopwatch.StartNew();
+
+        try
         {
-            while (!token.IsCancellationRequested)
+            var response = await httpClient.GetAsync(websiteUrl, token);
+            requestStopwatch.Stop();
+            totalDurations.Add(requestStopwatch.ElapsedMilliseconds);
+
+            if (response.IsSuccessStatusCode)
+                Interlocked.Increment(ref successCount);
+            else
             {
-                var requestStopwatch = Stopwatch.StartNew();
-
-                try
-                {
-                    var response = await httpClient.GetAsync(websiteUrl, token);
-                    requestStopwatch.Stop();
-                    totalDurations.Add(requestStopwatch.ElapsedMilliseconds);
-
-                    if (response.IsSuccessStatusCode)
-                        Interlocked.Increment(ref successCount);
-                    else
-                    {
-                        Interlocked.Increment(ref failureCount);
-                        statusCodeCounts.AddOrUpdate(response.StatusCode, 1, (_, count) => count + 1);
-                    }
-                }
-                catch
-                {
-                    requestStopwatch.Stop();
-                    Interlocked.Increment(ref failureCount);
-                    statusCodeCounts.AddOrUpdate(HttpStatusCode.RequestTimeout, 1, (_, count) => count + 1);
-                }
+                Interlocked.Increment(ref failureCount);
+                statusCodeCounts.AddOrUpdate(response.StatusCode, 1, (_, count) => count + 1);
             }
-        },
-        token);
+        }
+        catch (Exception ex)
+        {
+            if (ex is not TaskCanceledException)
+            {
+                requestStopwatch.Stop();
+                Interlocked.Increment(ref failureCount);
+                statusCodeCounts.AddOrUpdate(HttpStatusCode.RequestTimeout, 1, (_, count) => count + 1);
+            }
+        }
+    }
 }
 
-// Progress display loop
-var progressTask = Task.Run(
-    async () =>
+var requestsTask = Parallel.ForAsync(0, concurrentRequests, MakeRequests);
+
+_ = Task.Run(
+    () =>
     {
         while (!cts.Token.IsCancellationRequested)
         {
             Console.Clear();
-            Console.WriteLine($"Time remaining: {testDuration - stopwatch.Elapsed.TotalSeconds:F1}s");
+            Console.WriteLine($"Threads running: {concurrentRequests}");
             Console.WriteLine($"Successful requests: {successCount}");
             Console.WriteLine($"Failed requests: {failureCount}");
-            Console.WriteLine($"Threads running: {concurrentRequests}");
-            await Task.Delay(500); // Update every 500 ms
+            Console.WriteLine($"Time remaining (sec): {testDuration - stopwatch.Elapsed.TotalSeconds:N0}");
+            Thread.Sleep(500);
         }
     });
 
-await Task.WhenAll(tasks);
-await progressTask;
-
+await requestsTask;
 stopwatch.Stop();
 
 Console.WriteLine(Environment.NewLine);
-Console.WriteLine("Test completed.");
+Console.WriteLine("Test completed!");
+Console.WriteLine(Environment.NewLine);
+
 var totalRequests = successCount + failureCount;
-var averageRequestDuration = totalDurations.Count > 0 ? totalDurations.Average() : 0;
+var averageRequestDuration = TimeSpan.FromMilliseconds(totalDurations.DefaultIfEmpty(0).Average()).TotalSeconds;
 var requestsPerSecond = totalRequests / stopwatch.Elapsed.TotalSeconds;
 
 Console.WriteLine($"Total requests made: {totalRequests}");
@@ -128,8 +123,8 @@ Console.WriteLine($"Successful requests (HTTP 200): {successCount}");
 Console.WriteLine($"Failed requests: {failureCount}");
 foreach (var kvp in statusCodeCounts)
     Console.WriteLine($"  - {kvp.Key}: {kvp.Value}");
-Console.WriteLine($"Average request duration: {averageRequestDuration:F2} ms");
-Console.WriteLine($"Requests per second: {requestsPerSecond:F2}");
+Console.WriteLine($"Average request duration (sec): {averageRequestDuration:N0}");
+Console.WriteLine($"Requests per second: {requestsPerSecond:N0}");
 
 Console.WriteLine(Environment.NewLine);
 Console.WriteLine("Press any key to exit...");

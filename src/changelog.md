@@ -1,1 +1,2 @@
-- initial release
+- improve parallel request handling
+- various misc. improvements
