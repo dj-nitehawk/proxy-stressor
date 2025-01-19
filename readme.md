@@ -19,7 +19,7 @@ It allows you to configure the proxy settings, the number of simultaneous reques
 
 ## Usage
 
-Download the correct binary for your operating system from the **Releases** section and run it. 
+Download the correct binary for your operating system from the **[Releases](https://github.com/dj-nitehawk/proxy-stressor/releases)** section and run it. 
 You will be prompted for the test configuration details.
 
 ## Contributions
