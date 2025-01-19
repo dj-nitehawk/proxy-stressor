@@ -1,0 +1,50 @@
+name: Create Release With Binary Assets
+
+on:
+  push:
+    tags:
+      - v*
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        rid:
+          - linux-arm64
+          - linux-arm
+          - linux-musl-arm64
+          - linux-musl-arm
+          - linux-musl-x64
+          - linux-x64
+          - win-x64
+        include:
+          - rid: win-x64
+            runs-on: windows-latest
+      fail-fast: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: "9.x"
+
+      - name: Publish Binaries
+        working-directory: src
+        run: |
+          dotnet publish ./ProxyStressor.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -o ./bin/${{ matrix.rid }}          
+          cd ./bin/${{ matrix.rid }}
+          zip -r -9 ../${{ matrix.rid }}.zip ./*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2.2.1
+        if: ${{ !contains(github.ref, 'beta') }}
+        with:
+          draft: false
+          name: ${{ github.ref_name }} Release
+          body_path: src/changelog.md
+          files: src/bin/*.zip
