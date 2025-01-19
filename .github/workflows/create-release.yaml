@@ -36,7 +36,11 @@ jobs:
       - name: Publish Binaries
         working-directory: src
         run: |
-          dotnet publish ./ProxyStressor.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -o ./bin/${{ matrix.rid }}          
+          if [[ "${{ matrix.rid }}" == win-* ]]; then
+            dotnet publish ./ProxyStressor.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishTrimmed=true -o ./bin/${{ matrix.rid }}
+          else
+            dotnet publish ./ProxyStressor.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishAot=true -o ./bin/${{ matrix.rid }}
+          fi
           cd ./bin/${{ matrix.rid }}
           zip -r -9 ../${{ matrix.rid }}.zip ./*
 
